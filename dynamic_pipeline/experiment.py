@@ -86,9 +86,6 @@ def run_experiment(
     
     return pd.DataFrame(results)
 
-def read_data(path: str) -> pd.DataFrame:
-    return pd.read_csv(path, sep='\t')
-
 def main():
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
