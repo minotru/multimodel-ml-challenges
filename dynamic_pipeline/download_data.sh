@@ -1,0 +1,2 @@
+curl https://raw.githubusercontent.com/dotnet/samples/main/machine-learning/tutorials/GitHubIssueClassification/Data/issues_train.tsv --output data/raw/issues_train.tsv
+curl https://raw.githubusercontent.com/dotnet/samples/main/machine-learning/tutorials/GitHubIssueClassification/Data/issues_test.tsv --output data/raw/issues_test.tsv
