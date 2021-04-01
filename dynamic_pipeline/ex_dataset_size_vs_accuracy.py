@@ -23,6 +23,7 @@ logger = logging.getLogger()
 TEXT_COLUMN = "Title"
 LABEL_COLUMN = "Area"
 MAX_N = 10000
+MIN_SAMPLES_PER_CLASS = 10
 
 def experiment_iteration(
     grid_search: GridSearchCV,
