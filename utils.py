@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, List
 
 import pandas as pd
 
@@ -25,7 +25,5 @@ def select_popular_classes(
 
     return data_train, data_test
 
-def select_sample(
-   ,
-    n_samples: int,
-    min_samples_per_class: int)
+def join_text_columns(data: pd.DataFrame, text_columns: List[str]) -> pd.Series:
+    return data[text_columns].apply(lambda texts: " ".join(texts), axis=1)

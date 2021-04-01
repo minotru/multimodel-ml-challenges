@@ -16,11 +16,13 @@ import pandas as pd
 
 from utils import read_data
 from utils import preprocess_data
+from utils import join_text_columns
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger()
 
-TEXT_COLUMN = "Title"
+TEXT_COLUMN = "Text"
+TEXT_COLUMNS = ["Title", "Description"]
 LABEL_COLUMN = "Area"
 MAX_N = 10000
 MIN_SAMPLES_PER_CLASS = 10
@@ -58,6 +60,9 @@ def main():
     data_train = preprocess_data(data_train)
     data_test = preprocess_data(data_test)
 
+    for data in [data_train, data_test]:
+        data[TEXT_COLUMN] = join_text_columns(data, TEXT_COLUMNS)
+
     Ns = np.arange(1000, MAX_N, 1000)
     if Ns[-1] != MAX_N:
         Ns = np.append(Ns, MAX_N)
@@ -93,7 +98,7 @@ def main():
         results.append(result)
 
     results = pd.DataFrame(results)
-    results.to_csv("results/dataset_size_vs_accuracy.csv", index=False)
+    results.to_csv("results/dataset_size_vs_accuracy_join_texts.csv", index=False)
 
 if __name__ == "__main__":
     main()
