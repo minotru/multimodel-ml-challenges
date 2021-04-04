@@ -1,0 +1,4 @@
+{
+    "min_samples_per_class": 0,
+    "text_columns": ["Title", "Description"]
+}

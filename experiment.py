@@ -1,135 +1,146 @@
 """
-How the optimal pipeline depends on training data set size?
-
-Given: Dtrain[:N], Dtest
-Where D: (Title, Class)
-
-Optimal pipeline - with the highest metric(Dtest)
-
-Pseudo-code of the experiment:
-metrics = []
-for N in Ns:
-    for pipeline in pipelines:
-        pipeline.fit(Dtrain[:N])
-        metric_value = metric(pipeline, Dtest)
-        metrics.append({
-            'pipeline_name': pipeline.name,
-            'N': N,
-            'metric': metric_value
-        })
-        
-Considered pipeline components:
-1. Vectorization: 
-    * CountVectorizer vs TfidfVectorizer?
-    * max_features? 
-    * min_df vs max_df?
-2. Feature selection:
-    * Use or do not use?
-    * Algorithm: 
-2. Dim. reduction - TruncatedSVD:
-    * Use or do not use?
-    * n_components?
-3. Model:
-    * LogisticRegression
-    * SGDClassifier:
-        * loss?
-        * l1, l2 rate?
-        * alpha?
-    * MultinomialNB 
-    * ComplementNB
-
-Important questions to answer:
-1. max_features/N ratio impact
-2. TruncatedSVD: when to use, N vs M vs n_components
-3. TruncatedSVD vs model
+Experiment: how data set size N affects accuracy and other metrics?
 """
 
-from typing import List, Dict, Iterable
+from functools import partial
+from typing import Iterable, Dict, Callable
 import logging
+import argparse
+import json
+import time
 
-import pandas as pd
-import numpy as np
-
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
-from sklearn.base import clone
+from sklearn.metrics import accuracy_score, f1_score, make_scorer
+import numpy as np
+import pandas as pd
+
+from utils import read_data
+from utils import preprocess_data
+from utils import join_text_columns
+from utils import select_popular_classes
 
 logging.basicConfig(level="INFO")
 logger = logging.getLogger()
 
+TEXT_COLUMN = "Text"
+LABEL_COLUMN = "Area"
+MAX_N = 10000
+
+def run_experiment_iteration(
+    grid_search: GridSearchCV,
+    data_train: pd.DataFrame, 
+    data_test: pd.DataFrame
+) -> Dict:
+    result = dict()
+
+    result["N"] = len(data_train)
+    result["num_train_classes"] = data_train[LABEL_COLUMN].nunique()
+    result["num_test_classes"] = data_test[LABEL_COLUMN].nunique()
+
+    result["mean_num_samples_per_class"] = data_train[LABEL_COLUMN].value_counts().mean()
+    result["median_num_samples_per_class"] = data_train[LABEL_COLUMN].value_counts().median()
+
+    grid_search.fit(data_train[TEXT_COLUMN], data_train[LABEL_COLUMN])
+
+    for metric_name, scorer in grid_search.scorer_.items():
+        train_score = grid_search.cv_results_[f"mean_train_{metric_name}"][grid_search.best_index_]
+        val_score = grid_search.cv_results_[f"mean_test_{metric_name}"][grid_search.best_index_]
+        test_score = scorer(grid_search.best_estimator_, data_test[TEXT_COLUMN], data_test[LABEL_COLUMN])
+
+        result[f"train_{metric_name}"] = train_score
+        result[f"val_{metric_name}"] = val_score
+        result[f"test_{metric_name}"] = test_score
+
+    result.update(grid_search.best_params_)
+
+    return result
+
+
+def get_grid_search(config: Dict) -> GridSearchCV:
+    pipeline = Pipeline([
+        ("vectorizer", TfidfVectorizer(stop_words="english")),
+        ("model", LogisticRegression(max_iter=200, multi_class="ovr"))
+    ])
+
+    param_grid = {
+        "vectorizer__max_features": [100, 500, 1000, 2000, 5000, 10000, None],
+        "vectorizer__ngram_range": [(1, 1), (1, 2)],
+        "model__C": [0.001, 0.01, 0.5, 1]
+    }
+
+    grid_search = GridSearchCV(
+        pipeline, param_grid, 
+        scoring=["accuracy", "f1_weighted", "f1_macro"],
+        refit="f1_macro",
+        return_train_score=True,
+        cv=3, 
+        n_jobs=-1)
+
+    return grid_search
+
 def run_experiment(
-    X_train, y_train,
-    X_test, y_test,
-    Ns: List[int],
-    pipeline: Pipeline,
-    params_list: Iterable[Dict],
-    metric,
+    data_train: pd.DataFrame,
+    data_test: pd.DataFrame,
+    config: Dict
 ) -> pd.DataFrame:
-    logging.info(f"len(Ns) = {len(Ns)}, len(params_list) = {len(params_list)}, {len(Ns) * len(params_list)} combinations to check in total")
+    data_train = preprocess_data(data_train)
+    data_test = preprocess_data(data_test)
+
+    for data in [data_train, data_test]:
+        data[TEXT_COLUMN] = join_text_columns(data, config["text_columns"])
+
+    Ns = np.arange(1000, MAX_N, 1000)
+    if Ns[-1] != MAX_N:
+        Ns = np.append(Ns, MAX_N)
+
+    grid_search = get_grid_search(config)
 
     results = []
-    for N_idx, N in enumerate(Ns):
-        logger.info(f"running N = {N}, {N_idx + 1}'s' out of {len(Ns)}")
-        for params_idx, params in enumerate(params_list):
-            logger.info(f"running {params_idx}'s params out of {len(params_list)}")
+    for N in Ns:
+        logger.info(f"running for N = {N}")
+        t0 = time.time()
+        
+        data_train_sample = data_train[:N]
+        data_train_sample, data_test_sample = select_popular_classes(
+            data_train_sample, data_test, LABEL_COLUMN, config["min_samples_per_class"])
 
-            pipeline = clone(pipeline)
-            pipeline.set_params(**params)
+        result  = run_experiment_iteration(grid_search, data_train_sample, data_test_sample)
+        result["min_samples_per_class"] = config["min_samples_per_class"]
 
-            pipeline.fit(X_train[:N], y_train[:N])
-            score = metric(y_test, pipeline.predict(X_test))
-            results.append({
-                "N": N,
-                "M": pipeline.steps[-1][1].coef_.shape[1],
-                "params": params,
-                "score": score,
-            })
-    
-    return pd.DataFrame(results)
+        logger.info(f"completed in {int(time.time() - t0)} seconds")
+
+        results.append(result)
+
+    results = pd.DataFrame(results)
+
+    return results
 
 def main():
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import ParameterGrid
-    from sklearn.decomposition import TruncatedSVD
-    from sklearn.metrics import accuracy_score
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config_name", help="name of the config file from configs/")
 
-    TEXT_COLUMN = "Title"
-    LABEL_COLUMN = "Area"
+    args = parser.parse_args()
+
+    with open(f"configs/{args.config_name}.json", "r") as config_file:
+        config = json.load(config_file)
 
     data_train = read_data("data/raw/issues_train.tsv")
     data_test = read_data("data/raw/issues_test.tsv")
 
-    X_train, y_train = data_train[TEXT_COLUMN], data_train[LABEL_COLUMN]
-    X_test, y_test = data_test[TEXT_COLUMN], data_test[LABEL_COLUMN]
+    logger.info(f"running experiment: {args.config_name}")
 
-    pipeline = Pipeline([
-        ("vec", None),
-        ("svd", None),
-        ("model", None)
-    ])
+    t0 = time.time()
 
-    grid = ParameterGrid({
-        "vec": [TfidfVectorizer()],
-        "vec__max_features": [500, 1000, 5000],
-        "svd": [TruncatedSVD()],
-        "svd__n_components": [50, 100, 200, 300],
-        "model": [LogisticRegression()]
-    })
+    results = run_experiment(data_train, data_test, config)
 
-    Ns = [500, 1000, 1500, 2000, 2500, 5000, 10000]
+    logger.info(f"experiment completed in {int(time.time() - t0)} seconds")
 
-    results = run_experiment(
-        X_train, y_train,
-        X_test, y_test,
-        Ns,
-        pipeline,
-        grid,
-        accuracy_score
-    )
-
-    results = results.sort_values("score", ascending=False)
-    results.to_csv("results/result.csv", index=False)
-
+    results.to_csv(f"results/{args.config_name}.csv", index=False)
 
 if __name__ == "__main__":
     main()
+
+

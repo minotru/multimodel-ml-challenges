@@ -18,7 +18,7 @@ def select_popular_classes(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
     data_train = data_train.groupby(label_column) \
-        .filter(lambda g: g.size() >= min_samples_per_class)
+        .filter(lambda g: g.size >= min_samples_per_class)
 
     mask = data_test[label_column].isin(data_train[label_column])
     data_test = data_test[mask]

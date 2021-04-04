@@ -1,0 +1,4 @@
+python experiment.py title_only
+python experiment.py title_and_description
+python experiment.py 10_samples_per_class
+python experiment.py 20_samples_per_class
