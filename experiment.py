@@ -8,6 +8,7 @@ import logging
 import argparse
 import json
 import time
+from collections import Counter
 
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
@@ -28,6 +29,11 @@ logger = logging.getLogger()
 TEXT_COLUMN = "Text"
 LABEL_COLUMN = "Area"
 MAX_N = 10000
+DEFAULT_REPRESENTATION_THRESHOLD = 10
+
+def representation_score(y, K: int) -> float:
+    represented_count = sum(k for k in Counter(y).values() if k >= K)
+    return represented_count / len(y)
 
 def run_experiment_iteration(
     grid_search: GridSearchCV,
@@ -46,12 +52,15 @@ def run_experiment_iteration(
     grid_search.fit(data_train[TEXT_COLUMN], data_train[LABEL_COLUMN])
 
     for metric_name, scorer in grid_search.scorer_.items():
-        train_score = grid_search.cv_results_[f"mean_train_{metric_name}"][grid_search.best_index_]
-        val_score = grid_search.cv_results_[f"mean_test_{metric_name}"][grid_search.best_index_]
-        test_score = scorer(grid_search.best_estimator_, data_test[TEXT_COLUMN], data_test[LABEL_COLUMN])
+        for area in ["train", "test"]:
+            mean_score = grid_search.cv_results_[f"mean_{area}_{metric_name}"][grid_search.best_index_]
+            std_score = grid_search.cv_results_[f"std_{area}_{metric_name}"][grid_search.best_index_]
 
-        result[f"train_{metric_name}"] = train_score
-        result[f"val_{metric_name}"] = val_score
+            area_prefix = "train" if area == "train" else "val" 
+            result[f"{area_prefix}_{metric_name}"] = mean_score
+            result[f"std_{area_prefix}_{metric_name}"] = std_score
+
+        test_score = scorer(grid_search.best_estimator_, data_test[TEXT_COLUMN], data_test[LABEL_COLUMN])
         result[f"test_{metric_name}"] = test_score
 
     result.update(grid_search.best_params_)
@@ -103,12 +112,17 @@ def run_experiment(
         logger.info(f"running for N = {N}")
         t0 = time.time()
         
-        data_train_sample = data_train[:N]
+        data_train_sample = data_train.sample(N)
         data_train_sample, data_test_sample = select_popular_classes(
             data_train_sample, data_test, LABEL_COLUMN, config["min_samples_per_class"])
 
         result  = run_experiment_iteration(grid_search, data_train_sample, data_test_sample)
         result["min_samples_per_class"] = config["min_samples_per_class"]
+
+        representation_score_threshold = config.get("representation_score_threshold", DEFAULT_REPRESENTATION_THRESHOLD)
+        result["representation_score"] = representation_score(
+            data_train_sample[LABEL_COLUMN], representation_score_threshold)
+        result["representation_score_threshold"] = representation_score_threshold
 
         logger.info(f"completed in {int(time.time() - t0)} seconds")
 
