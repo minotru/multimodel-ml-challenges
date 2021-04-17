@@ -1,3 +1,4 @@
 {
+    "jupyter.jupyterServerType": "local",
     "python.pythonPath": "/home/skarasik/anaconda3/envs/dynamic_pipeline/bin/python"
 }

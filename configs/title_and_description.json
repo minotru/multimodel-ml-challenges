@@ -1,0 +1,5 @@
+{
+    "min_samples_per_class": 0,
+    "representation_threshold": 10,
+    "text_columns": ["Title", "Description"]
+}
